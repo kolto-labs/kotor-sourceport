@@ -6,9 +6,10 @@
 #include "k2_compiler.h"
 #include <stdint.h>
 #include <stddef.h>
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__EMSCRIPTEN__)
 // The engine spells the C file handle `struct __sFILE` (bionic's and Darwin's tag, and the binary's
-// mangling); glibc's is `struct _IO_FILE`. compat/include-glibc/stdio.h has the other half.
+// mangling); glibc's is `struct _IO_FILE`, and so is musl's (Emscripten).
+// compat/include-glibc/stdio.h has the other half.
 #define __sFILE _IO_FILE
 #endif
 #if defined(_WIN32)
