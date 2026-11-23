@@ -761,10 +761,16 @@ Model* FindModel(char* pszName);
 // Declared with a 32-bit return: the callers here expect the narrow form. Do not replace it with
 // math3d.h's unsigned long version; the MSVC ABI mangles the return type, so there the declaration
 // has to match the definition.
+#ifdef __EMSCRIPTEN__
+// wasm traps a call whose signature differs from the definition's, so here too the declaration
+// matches math3d.cpp's (the callers keep only the narrow value).
+uint64_t FloorLogBase2(uint64_t x);
+#else
 #ifdef _MSC_VER
 uint64_t FloorLogBase2(uint64_t x);
 #else
 int FloorLogBase2(uint64_t x);
+#endif
 #endif
 
 // The `gobs` registry is a plain list, walked linearly here.

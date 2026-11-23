@@ -79,6 +79,17 @@ if(K2P_ASAN AND NOT WIN32)
   message(STATUS "k2: AddressSanitizer on")
 endif()
 
+# ---- Emscripten (preset k1-wasm-pc, platforms/wasm) ---------------------------------------------
+# Every C/C++ target, the engine included, compiles and links for the same machine: wasm64, since the
+# engine is a 64-bit decompile whose static_asserts pin LP64 struct sizes; pthreads, which the engine
+# and the shim use (WinThreadsMP.h, shim_thread.cpp); and Emscripten's SDL2 / FreeType / zlib ports,
+# whose headers the engine (K1's SDL_main), the shim and the movie player include.
+if(EMSCRIPTEN)
+  set(K2P_WASM_FLAGS -sMEMORY64=1 -pthread -sUSE_SDL=2 -sUSE_FREETYPE=1 -sUSE_ZLIB=1)
+  add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:${K2P_WASM_FLAGS}>")
+  add_link_options(${K2P_WASM_FLAGS})
+endif()
+
 set(K2_HOST_FLAGS
     -fsigned-char
     # The device build has no fused multiply-adds, while modern clang contracts a*b+c by default,
@@ -363,7 +374,7 @@ add_compile_definitions(K2_QOL_FRAME_PACING=1)
 # menu (swguioptions.cpp K1QolApplyDisplay, k1/k1sdl.cpp), and in a loaded game at the next launch.
 # K1's Screen Resolution lists the host's window sizes and applies the same way; its V-Sync row drives
 # the swap interval (k1sdl.cpp k2host_set_vsync).
-if((K2P_QOL_IMPROVEMENTS OR K2P_GAME STREQUAL "k1") AND NOT ANDROID AND NOT IOS)
+if((K2P_QOL_IMPROVEMENTS OR K2P_GAME STREQUAL "k1") AND NOT ANDROID AND NOT IOS AND NOT EMSCRIPTEN)
   add_compile_definitions(K2_QOL_FULLSCREEN=1)
 endif()
 # KOTOR 1, xbox UI: OK / Cancel boxes (answered by A / B) open with neither button selected,
@@ -390,6 +401,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
   add_compile_definitions(_LIBCPP_NO_ABI_TAG=1)
   # AurLogFile's fopen: on Darwin libc++'s <algorithm> brings <stdio.h> in, on glibc it does not.
   set_property(SOURCE "${K2_REPO}/src/libsource/AURORA/auremitter.cpp" APPEND PROPERTY COMPILE_OPTIONS -include stdio.h)
+endif()
+# Emscripten (musl + libc++): the same libc++ placement new, auremitter.cpp's fopen as on glibc, and
+# the <math.h> two TUs use without including (as on Windows, below).
+if(EMSCRIPTEN)
+  add_compile_definitions(_LIBCPP_NO_ABI_TAG=1)
+  set_property(SOURCE "${K2_REPO}/src/libsource/AURORA/auremitter.cpp" APPEND PROPERTY COMPILE_OPTIONS -include stdio.h)
+  set_property(SOURCE "${K2_REPO}/src/game/clientcore/clientinput.cpp" "${K2_REPO}/src/game/clientcore/swguiingame.cpp"
+               APPEND PROPERTY COMPILE_OPTIONS -include math.h)
 endif()
 # Windows (mingw-w64 UCRT + libc++): compat/include-mingw/ is the CRT as the engine expects to see
 # it.
@@ -530,7 +549,7 @@ if(K2P_GAME STREQUAL "k1")
   endif()
   # With exceptions on, glibc's noexcept strcasecmp may not follow the TU's own plain prototype;
   # seen first, a system header's spec is one a later plain redeclaration may leave out.
-  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
+  if((CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID) OR EMSCRIPTEN)
     set_property(SOURCE "${K2_REPO}/src/libsource/AURORA/aurmodelparse.cpp" APPEND PROPERTY COMPILE_OPTIONS -include strings.h)
   endif()
 endif()
@@ -659,7 +678,8 @@ endif()
 # K2P_MOBILE_HOST: a phone's or tablet's OS -- one fullscreen window SDL sizes, GLES 2 with gl4es in
 # front of it (android/gl4es_glue.cpp), no desktop window modes. Distinguish it from K2P_MOBILE_OPT
 # (the shipped port's content cuts) and K2P_UI (how the game is driven). K2P_IOS: iOS on top.
-if(ANDROID OR IOS)
+# The browser (Emscripten) is one too: one canvas SDL sizes, WebGL (GLES 2) with gl4es in front.
+if(ANDROID OR IOS OR EMSCRIPTEN)
   add_compile_definitions(K2P_MOBILE_HOST=1)
 endif()
 if(IOS)
@@ -675,6 +695,9 @@ elseif(IOS)
   set(K2P_AUDIO_TOOLS OFF CACHE BOOL "" FORCE)
 elseif(WIN32)
   include(${K2P_DIR}/windows/deps.cmake)
+  set(K2P_AUDIO_TOOLS OFF CACHE BOOL "" FORCE)
+elseif(EMSCRIPTEN)
+  include(${K2P_DIR}/wasm/deps.cmake)   # gl4es; SDL2 / FreeType / zlib are Emscripten ports
   set(K2P_AUDIO_TOOLS OFF CACHE BOOL "" FORCE)
 endif()
 
@@ -693,6 +716,8 @@ elseif(IOS)
   add_subdirectory(platforms/ios ios)
 elseif(APPLE)
   add_subdirectory(platforms/macos macos)
+elseif(EMSCRIPTEN)
+  add_subdirectory(platforms/wasm wasm)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_subdirectory(platforms/linux linux)
 elseif(WIN32)

@@ -4,6 +4,17 @@
 // like everything else the engine draws.
 #include <math.h>
 
+#ifdef __EMSCRIPTEN__
+// gl4es exports no plain gl* names on Emscripten (its attributes.h), where they are WebGL's own:
+// call its entry points by their internal names, so these still land in gl4es's state.
+#define glOrtho gl4es_glOrtho
+#define glFrustum gl4es_glFrustum
+#define glTexImage2D gl4es_glTexImage2D
+#define glTexParameteri gl4es_glTexParameteri
+#define glGetIntegerv gl4es_glGetIntegerv
+#define glPixelStorei gl4es_glPixelStorei
+#endif
+
 extern "C" {
 void glOrtho(double l, double r, double b, double t, double n, double f);
 void glFrustum(double l, double r, double b, double t, double n, double f);

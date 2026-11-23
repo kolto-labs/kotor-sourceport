@@ -122,7 +122,12 @@ extern "C" void BinkClose(void* pBink);
 extern "C" int64_t BinkNextFrame(void* pBink);
 extern "C" void BinkDoFrame(void* pBink);
 #if KOTOR1
+#ifdef __EMSCRIPTEN__
+// wasm traps a call whose signature differs from the definition's: the platform's (null/bink_null.cpp).
+extern "C" int64_t BinkWait(void* pBink);
+#else
 extern "C" int  BinkWait(void* pBink);
+#endif
 #else
 extern "C" int64_t BinkWait(void* pBink);
 #endif

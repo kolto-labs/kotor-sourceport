@@ -79,6 +79,10 @@ typedef __UINTPTR_TYPE__ uintptr_t;
 #if __SIZEOF_LONG__ == 8 && !defined(__APPLE__)
 #define K2_INT64_IS_LONG 1
 #endif
+#ifdef __EMSCRIPTEN__
+// wasm64: long is 8 bytes, but int64_t is `long long` (Emscripten's musl), as on Darwin.
+#undef K2_INT64_IS_LONG
+#endif
 
 // uint64_ll_t: an unsigned value the original keeps 64 bits wide in its armv7 build too, such as an
 // effect id. The tree's other `unsigned long long`s are object ids, which that build narrowed to 32

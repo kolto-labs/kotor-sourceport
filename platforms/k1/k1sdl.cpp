@@ -67,11 +67,20 @@ int SDL_IsChromebook(void)
 #endif
 }
 
+#include "k2wrap.h"
+K2P_WRAPPED(SDL_CreateWindow)
+K2P_WRAPPED(SDL_GL_CreateContext)
+K2P_WRAPPED(SDL_GL_SetAttribute)
+K2P_WRAPPED(SDL_GL_SwapWindow)
+K2P_WRAPPED(SDL_GetDisplayMode)
+K2P_WRAPPED(SDL_JoystickOpen)
+K2P_WRAPPED(SDL_PollEvent)
+
 namespace {
 template <class Fn>
 Fn Real(const char* pszName)
 {
-    Fn fn = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, pszName));
+    Fn fn = reinterpret_cast<Fn>(K2P_NEXT(pszName));
     if (!fn) {
         fprintf(stderr, "k1: %s: no SDL definition behind ours\n", pszName);
         abort();
@@ -225,7 +234,7 @@ extern "C" int SDL_GL_SetSwapInterval(int nInterval)
 }
 #endif
 
-extern "C" int SDL_GL_SetAttribute(SDL_GLattr attr, int value)
+extern "C" int K2P_WRAP(SDL_GL_SetAttribute)(SDL_GLattr attr, int value)
 {
     static auto real = Real<int (*)(SDL_GLattr, int)>("SDL_GL_SetAttribute");
 #ifndef K2P_MOBILE_HOST
@@ -253,7 +262,7 @@ extern "C" int SDL_GL_SetAttribute(SDL_GLattr attr, int value)
     return real(attr, value);
 }
 
-extern "C" int SDL_GetDisplayMode(int nDisplay, int nMode, SDL_DisplayMode* pMode)
+extern "C" int K2P_WRAP(SDL_GetDisplayMode)(int nDisplay, int nMode, SDL_DisplayMode* pMode)
 {
     static auto real = Real<int (*)(int, int, SDL_DisplayMode*)>("SDL_GetDisplayMode");
     int r = real(nDisplay, nMode, pMode);
@@ -316,7 +325,7 @@ extern "C" int k1pc_key_drain(unsigned char* pDik, unsigned char* pData, int nMa
 }
 #endif
 
-extern "C" SDL_Window* SDL_CreateWindow(const char* pszTitle, int x, int y, int w, int h, Uint32 flags)
+extern "C" SDL_Window* K2P_WRAP(SDL_CreateWindow)(const char* pszTitle, int x, int y, int w, int h, Uint32 flags)
 {
 #ifdef K2_UI_PC
     SDL_AddEventWatch(KeyWatch, 0);
@@ -361,7 +370,7 @@ extern "C" SDL_Window* SDL_CreateWindow(const char* pszTitle, int x, int y, int 
 }
 
 #ifdef K2P_MOBILE_HOST
-extern "C" SDL_GLContext SDL_GL_CreateContext(SDL_Window* pWindow)
+extern "C" SDL_GLContext K2P_WRAP(SDL_GL_CreateContext)(SDL_Window* pWindow)
 {
     static auto real = Real<SDL_GLContext (*)(SDL_Window*)>("SDL_GL_CreateContext");
     SDL_GLContext ctx = real(pWindow);
@@ -727,7 +736,7 @@ Uint8 FaceButton(Uint8 nButton)
 
 #ifdef __ANDROID__
 // Android's SDL already numbers a pad's buttons in GameController order.
-extern "C" int SDL_PollEvent(SDL_Event* e)
+extern "C" int K2P_WRAP(SDL_PollEvent)(SDL_Event* e)
 {
     static auto real = Real<int (*)(SDL_Event*)>("SDL_PollEvent");
     int r = real(e);
@@ -875,7 +884,7 @@ void ForgetPad(SDL_JoystickID nId)
 }
 } // namespace
 
-extern "C" SDL_Joystick* SDL_JoystickOpen(int nIndex)
+extern "C" SDL_Joystick* K2P_WRAP(SDL_JoystickOpen)(int nIndex)
 {
     static auto real = Real<SDL_Joystick* (*)(int)>("SDL_JoystickOpen");
     // The controller behind Steam's virtual gamepad stays closed: opening a Valve controller hands
@@ -986,7 +995,7 @@ int PollPadEvent(SDL_Event* e)
 }
 } // namespace
 
-extern "C" int SDL_PollEvent(SDL_Event* e)
+extern "C" int K2P_WRAP(SDL_PollEvent)(SDL_Event* e)
 {
     int r = PollPadEvent(e);
     if (r && e && PadTrace()) TracePad("main", e);
@@ -995,7 +1004,7 @@ extern "C" int SDL_PollEvent(SDL_Event* e)
 #endif
 
 void k1gl_frame();   // k1port.cpp: the one-frame GL trace
-extern "C" void SDL_GL_SwapWindow(SDL_Window* pWindow)
+extern "C" void K2P_WRAP(SDL_GL_SwapWindow)(SDL_Window* pWindow)
 {
     static auto real = Real<void (*)(SDL_Window*)>("SDL_GL_SwapWindow");
     k1gl_frame();
