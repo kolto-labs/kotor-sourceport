@@ -31,6 +31,11 @@
 #include <set>
 #include <string>
 
+#include "k2wrap.h"
+K2P_WRAPPED(opendir)
+K2P_WRAPPED(readdir)
+K2P_WRAPPED(closedir)
+
 namespace {
 
 std::string s_user;   // absolute; empty leaves everything in the working directory
@@ -44,7 +49,7 @@ std::vector<Mount> s_redirects;   // prefix is the folder each replacement takes
 template <class Fn>
 Fn RealFn(const char* pszName)
 {
-    Fn fn = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, pszName));
+    Fn fn = reinterpret_cast<Fn>(K2P_NEXT(pszName));
     if (!fn) {
         fprintf(stderr, "k2shim: libc %s not found\n", pszName);
         abort();
@@ -274,7 +279,7 @@ MergedDir* Merged(DIR* d)
 
 extern "C" {
 
-DIR* opendir(const char* pszPath)
+DIR* K2P_WRAP(opendir)(const char* pszPath)
 {
     if (pszPath[0] == '/' || DrivePath(pszPath)) return RealOpendir(pszPath);
     std::vector<std::string> dirs;
@@ -303,7 +308,7 @@ DIR* opendir(const char* pszPath)
     return reinterpret_cast<DIR*>(m);
 }
 
-struct dirent* readdir(DIR* d)
+struct dirent* K2P_WRAP(readdir)(DIR* d)
 {
     if (MergedDir* m = Merged(d)) return m->next < m->entries.size() ? &m->entries[m->next++] : 0;
     return RealReaddir(d);
@@ -319,7 +324,7 @@ struct dirent64* readdir64(DIR* d)
 }
 #endif
 
-int closedir(DIR* d)
+int K2P_WRAP(closedir)(DIR* d)
 {
     if (MergedDir* m = Merged(d)) {
         {
