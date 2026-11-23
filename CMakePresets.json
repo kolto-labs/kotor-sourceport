@@ -270,6 +270,15 @@
       "inherits": "cross-android-base",
       "displayName": "KOTOR 1: Android APK (arm64), console UI for a game controller",
       "cacheVariables": {"K2P_UI": "xbox", "K2P_GAME": "k1", "K2A_PACKAGE": "com.aspyr.swkotor.hybrid"}
+    },
+    {
+      "name": "k1-wasm-pc",
+      "inherits": "base",
+      "displayName": "KOTOR 1: browser (Emscripten, wasm64), PC UI",
+      "description": "Emscripten build (platforms/wasm): source emsdk_env.sh first, so EMSDK is set",
+      "condition": {"type": "notEquals", "lhs": "$env{EMSDK}", "rhs": ""},
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables": {"K2P_UI": "pc", "K2P_GAME": "k1", "CMAKE_BUILD_TYPE": "Release", "K2P_LINKREPORT": "OFF"}
     }
   ],
   "buildPresets": [
@@ -311,6 +320,7 @@
     {"name": "k2-cross-android-touch", "configurePreset": "k2-cross-android-touch"},
     {"name": "k2-cross-android-xbox", "configurePreset": "k2-cross-android-xbox"},
     {"name": "k1-cross-android-touch", "configurePreset": "k1-cross-android-touch"},
-    {"name": "k1-cross-android-xbox", "configurePreset": "k1-cross-android-xbox"}
+    {"name": "k1-cross-android-xbox", "configurePreset": "k1-cross-android-xbox"},
+    {"name": "k1-wasm-pc", "configurePreset": "k1-wasm-pc", "condition": {"type": "notEquals", "lhs": "$env{EMSDK}", "rhs": ""}}
   ]
 }
