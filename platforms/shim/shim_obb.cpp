@@ -56,8 +56,8 @@ int Read(void* c, char* buf, int n)
     return static_cast<int>(got);
 }
 
-#if defined(__GLIBC__)
-// glibc has no funopen: the same three behind fopencookie.
+#if defined(__GLIBC__) || defined(__EMSCRIPTEN__)
+// glibc has no funopen: the same three behind fopencookie (musl, Emscripten's libc, has it too).
 ssize_t CookieRead(void* c, char* buf, size_t n) { return Read(c, buf, n > 0x7fffffff ? 0x7fffffff : static_cast<int>(n)); }
 int CookieSeek(void* c, off64_t* pOff, int whence)
 {
@@ -232,7 +232,7 @@ FILE* k2shim_obb_fopen(const char* pszPath, const char* pszMode)
     delete s;
     if (f) rewind(f);
     return f;
-#elif defined(__GLIBC__)
+#elif defined(__GLIBC__) || defined(__EMSCRIPTEN__)
     cookie_io_functions_t io = { CookieRead, 0, CookieSeek, Close };
     FILE* f = fopencookie(s, "r", io);
 #else

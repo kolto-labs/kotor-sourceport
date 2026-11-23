@@ -27,12 +27,24 @@
 #include <algorithm>
 #include <vector>
 
+#include "k2wrap.h"
+K2P_WRAPPED(fopen)
+K2P_WRAPPED(stat)
+K2P_WRAPPED(access)
+K2P_WRAPPED(remove)
+K2P_WRAPPED(rename)
+K2P_WRAPPED(unlink)
+K2P_WRAPPED(chmod)
+K2P_WRAPPED(mkdir)
+K2P_WRAPPED(rmdir)
+K2P_WRAPPED(chdir)
+
 namespace {
 
 template <class Fn>
 Fn Real(const char* pszName)
 {
-    Fn fn = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, pszName));
+    Fn fn = reinterpret_cast<Fn>(K2P_NEXT(pszName));
     if (!fn) {
         fprintf(stderr, "k2shim: libc %s not found\n", pszName);
         abort();
@@ -97,7 +109,7 @@ FILE* WithoutCRs(FILE* f, const char* pszPath)
 
 extern "C" {
 
-FILE* fopen(const char* __restrict pszPath, const char* __restrict pszMode)
+FILE* K2P_WRAP(fopen)(const char* __restrict pszPath, const char* __restrict pszMode)
 {
     static auto real = Real<FILE* (*)(const char*, const char*)>("fopen");
     if (!pszPath) return 0;
@@ -113,7 +125,7 @@ FILE* fopen(const char* __restrict pszPath, const char* __restrict pszMode)
     return f;
 }
 
-int stat(const char* __restrict pszPath, struct stat* __restrict pSt)
+int K2P_WRAP(stat)(const char* __restrict pszPath, struct stat* __restrict pSt)
 {
     static auto real = Real<int (*)(const char*, struct stat*)>("stat");
     HostPath host(pszPath);
@@ -121,7 +133,7 @@ int stat(const char* __restrict pszPath, struct stat* __restrict pSt)
     return r == 0 || !k2shim_obb_stat(host, pSt) ? r : 0;
 }
 
-int access(const char* pszPath, int nMode)
+int K2P_WRAP(access)(const char* pszPath, int nMode)
 {
     static auto real = Real<int (*)(const char*, int)>("access");
     HostPath host(pszPath);
@@ -136,25 +148,25 @@ int access(const char* pszPath, int nMode)
 int _stat(const char* pszPath, struct stat* pSt) { return stat(pszPath, pSt); }
 #if defined(__APPLE__)
 int stat64(const char* pszPath, struct stat* pSt) { return stat(pszPath, pSt); }
-#elif !defined(_WIN32)
+#elif !defined(_WIN32) && !defined(__EMSCRIPTEN__)   // musl: stat64 is a macro for stat
 int stat64(const char* pszPath, struct stat64* pSt) { return stat(pszPath, reinterpret_cast<struct stat*>(pSt)); }
 #endif
 
-int remove(const char* pszPath)
+int K2P_WRAP(remove)(const char* pszPath)
 {
     static auto real = Real<int (*)(const char*)>("remove");
     WritePath path(pszPath);
     return Logged("remove", path, real(path));
 }
 
-int rename(const char* pszOld, const char* pszNew)
+int K2P_WRAP(rename)(const char* pszOld, const char* pszNew)
 {
     static auto real = Real<int (*)(const char*, const char*)>("rename");
     WritePath from(pszOld);
     return Logged("rename", from, real(from, WritePath(pszNew, true)));
 }
 
-int unlink(const char* pszPath)
+int K2P_WRAP(unlink)(const char* pszPath)
 {
     static auto real = Real<int (*)(const char*)>("unlink");
     WritePath path(pszPath);
@@ -164,29 +176,29 @@ int unlink(const char* pszPath)
 // The engine clears a file's read-only bit (chmod 0200) before deleting one (CExoResMan::RemoveFile,
 // overwriting a save), so this has to reach the file remove will, or Windows refuses the delete.
 #ifdef _WIN32
-int chmod(const char* pszPath, int nMode)   // mingw-w64's <io.h> spelling
+int K2P_WRAP(chmod)(const char* pszPath, int nMode) // mingw-w64's <io.h> spelling
 #else
-int chmod(const char* pszPath, mode_t nMode)
+int K2P_WRAP(chmod)(const char* pszPath, mode_t nMode)
 #endif
 {
     static auto real = Real<int (*)(const char*, decltype(nMode))>("chmod");
     return real(WritePath(pszPath), nMode);
 }
 
-int mkdir(const char* pszPath, mode_t nMode)
+int K2P_WRAP(mkdir)(const char* pszPath, mode_t nMode)
 {
     static auto real = Real<int (*)(const char*, mode_t)>("mkdir");
     return real(WritePath(pszPath, true), nMode);
 }
 
-int rmdir(const char* pszPath)
+int K2P_WRAP(rmdir)(const char* pszPath)
 {
     static auto real = Real<int (*)(const char*)>("rmdir");
     WritePath path(pszPath);
     return Logged("rmdir", path, real(path));
 }
 
-int chdir(const char* pszPath)
+int K2P_WRAP(chdir)(const char* pszPath)
 {
     static auto real = Real<int (*)(const char*)>("chdir");
     return real(HostPath(pszPath));
