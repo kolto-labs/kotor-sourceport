@@ -60,7 +60,7 @@ target_compile_definitions(k2movie PRIVATE K2M_GL_GETPROC=gl4es_GetProcAddress) 
 add_executable(${K2P_EXE} ${K2P_DIR}/macos/main.cpp ${K2P_DIR}/macos/gamedirs.cpp)
 target_compile_definitions(${K2P_EXE} PRIVATE K2P_K1=1)   # main.cpp: enter K1's SDL_main
 set_target_properties(${K2P_EXE} PROPERTIES CXX_STANDARD 11 RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-                                            LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/k1_pre.js")
+                                            LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/k1_pre.js;${CMAKE_CURRENT_SOURCE_DIR}/k2_present.js")
 target_link_libraries(${K2P_EXE} PRIVATE
   "-Wl,--whole-archive" k2_engine "-Wl,--no-whole-archive"   # the whole engine, static ctors included
   k2_platform
@@ -70,7 +70,7 @@ set(K2P_WASM_WRAP SDL_Init SDL_CreateWindow SDL_GL_CreateContext SDL_GL_SetAttri
                   SDL_JoystickOpen SDL_PollEvent fopen stat access remove rename unlink chmod mkdir rmdir chdir
                   # wasm_webgl.cpp: the GL context calls, answered on the engine's thread instead of SDL's EGL
                   SDL_GL_MakeCurrent SDL_GL_GetCurrentContext SDL_GL_GetCurrentWindow SDL_GL_DeleteContext
-                  SDL_GL_SetSwapInterval SDL_GL_GetDrawableSize
+                  SDL_GL_SetSwapInterval SDL_GL_GetDrawableSize SDL_SetWindowFullscreen
                   )   # not opendir/readdir/closedir: shim_path defines those only off K2P_MOBILE_HOST
 list(TRANSFORM K2P_WASM_WRAP PREPEND "-Wl,--wrap=")
 target_link_options(${K2P_EXE} PRIVATE
@@ -83,6 +83,10 @@ target_link_options(${K2P_EXE} PRIVATE
   -sGL_ENABLE_GET_PROC_ADDRESS=1
   # memory: the engine sizes its own pools; a decompile's frames can be large
   -sALLOW_MEMORY_GROWTH=1
+  # growable views of the shared memory: without them every JS access to the heap (each GL call
+  # among them) first checks whether the memory grew. Required, not detected: Chrome has them; Firefox
+  # from 154 (Emscripten's settings.js)
+  -sGROWABLE_ARRAYBUFFERS=2
   -sINITIAL_MEMORY=512MB
   -sMAXIMUM_MEMORY=16GB
   -sSTACK_SIZE=8MB
@@ -90,4 +94,6 @@ target_link_options(${K2P_EXE} PRIVATE
   # files: the player's folder, mounted by the page (k1_pre.js); nothing is preloaded
   -sFORCE_FILESYSTEM=1
   "-sEXPORTED_RUNTIME_METHODS=['FS','ENV']"
-  "--pre-js=${CMAKE_CURRENT_SOURCE_DIR}/k1_pre.js")
+  "--pre-js=${CMAKE_CURRENT_SOURCE_DIR}/k1_pre.js"
+  # frames posted from the engine's worker to the page (wasm_webgl.cpp, k1_pre.js)
+  "--js-library=${CMAKE_CURRENT_SOURCE_DIR}/k2_present.js")

@@ -7,15 +7,21 @@
 // So this build makes the WebGL context on the engine's thread itself and answers SDL's GL context
 // calls from it; windows, events and the rest of SDL stay SDL's.
 //
-// The engine never returns to the browser between frames (its loop blocks), so frames are presented
-// explicitly: explicitSwapControl, and a commit at every swap.
+// The engine never returns to the browser between frames (its loop blocks), and a worker's
+// OffscreenCanvas reaches the screen only when the worker returns to its event loop. So at every swap
+// the frame is posted to the page as an ImageBitmap (k2_present.js), and the work other threads have
+// queued for this one is run: SDL's input callbacks among it, which otherwise wait for the engine to
+// sleep, tens of seconds on the main menu.
 //
 // SDL_GL_CreateContext, SDL_GL_SwapWindow and SDL_GL_SetAttribute are interposed by k1/k1sdl.cpp;
 // wasm_wrap.cpp hands it these functions as the "originals" behind them. The other context calls
 // are wrapped here directly (-Wl,--wrap, wasm/CMakeLists.txt).
 #include <SDL.h>
 #include <emscripten/html5.h>
+#include <emscripten/threading.h>
 #include <stdint.h>
+
+extern "C" int k2p_present_frame(void);   // k2_present.js
 
 namespace {
 
@@ -74,7 +80,16 @@ extern "C" SDL_GLContext k2p_webgl_create_context(SDL_Window* pWindow)
 
 extern "C" void k2p_webgl_swap_window(SDL_Window*)
 {
-    if (t_context) emscripten_webgl_commit_frame();
+    if (t_context) k2p_present_frame();
+    emscripten_current_thread_process_queued_calls();
+}
+
+// Browsers enter full screen only from the player's own click on the page, which a request from this
+// thread never is (the page offers a button instead). Taken here, the request would leave SDL's
+// window fullscreen-sized in a canvas that is not.
+extern "C" int __wrap_SDL_SetWindowFullscreen(SDL_Window*, Uint32)
+{
+    return 0;
 }
 
 extern "C" int __wrap_SDL_GL_MakeCurrent(SDL_Window* pWindow, SDL_GLContext context)
