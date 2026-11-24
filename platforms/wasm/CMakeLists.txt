@@ -83,10 +83,8 @@ target_link_options(${K2P_EXE} PRIVATE
   -sGL_ENABLE_GET_PROC_ADDRESS=1
   # memory: the engine sizes its own pools; a decompile's frames can be large
   -sALLOW_MEMORY_GROWTH=1
-  # growable views of the shared memory: without them every JS access to the heap (each GL call
-  # among them) first checks whether the memory grew. Required, not detected: Chrome has them; Firefox
-  # from 154 (Emscripten's settings.js)
-  -sGROWABLE_ARRAYBUFFERS=2
+  # Not -sGROWABLE_ARRAYBUFFERS: it makes the heap a resizable buffer, and WebGL 1 refuses views of one
+  # (bufferSubData: "must not be resizable"), so gl4es's first client-array draw throws.
   -sINITIAL_MEMORY=512MB
   -sMAXIMUM_MEMORY=16GB
   -sSTACK_SIZE=8MB
