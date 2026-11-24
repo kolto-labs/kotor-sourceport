@@ -29,11 +29,20 @@ if (typeof window !== 'undefined' && !Module['k2Frame']) {
       new ResizeObserver(place).observe(under);
       window.addEventListener('resize', place);
     }
-    var ctx = view._k2ctx || (view._k2ctx = view.getContext('bitmaprenderer'));
-    if (view.width !== frame.width) view.width = frame.width;
-    if (view.height !== frame.height) view.height = frame.height;
-    ctx.transferFromImageBitmap(frame);
-    Atomics.sub(inflight, 0, 1);
+    // The frame is always released and counted off, even when showing it fails, so a failed frame
+    // never stops the next ones (k2_present.js sends at most two at once).
+    try {
+      var ctx = view._k2ctx || (view._k2ctx = view.getContext('bitmaprenderer'));
+      if (!ctx) throw new Error('this browser has no bitmaprenderer canvas');
+      if (view.width !== frame.width) view.width = frame.width;
+      if (view.height !== frame.height) view.height = frame.height;
+      ctx.transferFromImageBitmap(frame);
+    } catch (e) {
+      frame.close();
+      if (!view._k2warned) { view._k2warned = true; err('k1: a frame could not be shown: ' + e); }
+    } finally {
+      Atomics.sub(inflight, 0, 1);
+    }
   };
 }
 Module['preRun'] = [].concat(Module['preRun'] || [], function () {
