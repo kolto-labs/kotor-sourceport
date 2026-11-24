@@ -28,11 +28,27 @@ bool Trace()
 int s_dummy;   // the one "object" every lookup returns
 jobject Dummy() { return reinterpret_cast<jobject>(&s_dummy); }
 
-// Generic slots: any arguments, integer/pointer result 0. Float and double results need their own
-// slots, which return 0 too.
-int64_t NullFn() { return 0; }
-float NullFloat() { return 0.0f; }
-double NullDouble() { return 0.0; }
+// Every slot holds a function of exactly the slot's own type. Native ABIs would let one generic
+// "return 0" function stand in for all of them, but WebAssembly checks the type of every indirect
+// call and traps on a mismatch ("function signature mismatch"), so the types are generated from the
+// slots themselves. Zero answers 0 / null / false / 0.0 / nothing; Handle answers the dummy handle.
+template <typename F> struct Slot;
+template <typename R, typename... A> struct Slot<R (*)(A...)> {
+    static R Zero(A...) { return R(); }
+    static R Handle(A...) { return reinterpret_cast<R>(&s_dummy); }
+};
+template <typename R, typename... A> struct Slot<R (*)(A..., ...)> {
+    static R Zero(A..., ...) { return R(); }
+};
+// Call<Type>Method and Get<Type>Field slots whose answer comes from the method or field id, their
+// third argument on every form (varargs, V and A alike).
+template <typename F> struct ById;
+template <typename R, typename X, typename Id, typename... Rest> struct ById<R (*)(JNIEnv*, X, Id, Rest...)> {
+    template <R (*Answer)(const void*)> static R Fn(JNIEnv*, X, Id id, Rest...) { return Answer(id); }
+};
+template <typename R, typename X, typename Id> struct ById<R (*)(JNIEnv*, X, Id, ...)> {
+    template <R (*Answer)(const void*)> static R Fn(JNIEnv*, X, Id id, ...) { return Answer(id); }
+};
 
 jclass FindClass(JNIEnv*, const char* name)
 {
@@ -70,11 +86,9 @@ jmethodID GetMethodID(JNIEnv*, jclass, const char* name, const char* sig)
     r->value = v ? strtol(v, 0, 0) : nDefault;
     return reinterpret_cast<jmethodID>(r);
 }
-bool IsRec(jmethodID m) { return static_cast<void*>(m) != static_cast<void*>(&s_dummy); }
-int64_t RecValue(jmethodID m) { return m && IsRec(m) ? reinterpret_cast<MethodRec*>(m)->value : 0; }
-// The method id is the third argument on every Call*Method form (v, A and varargs alike)
-jboolean CallBool(JNIEnv*, void*, jmethodID m, ...) { return RecValue(m) != 0; }
-jint CallInt(JNIEnv*, void*, jmethodID m, ...) { return static_cast<jint>(RecValue(m)); }
+int64_t RecValue(const void* m) { return m && m != &s_dummy ? static_cast<const MethodRec*>(m)->value : 0; }
+jboolean AnswerBool(const void* m) { return RecValue(m) != 0; }
+jint AnswerInt(const void* m) { return static_cast<jint>(RecValue(m)); }
 // Fields the same way: K2_JNI_<field>=<number> is what Get(Static)FloatField answers for it
 // (KOTOR 1's SDL_main reads DisplayMetrics.xdpi / ydpi for its tap tolerances); default 0.
 struct FieldRec { char name[64]; float value; };
@@ -94,11 +108,7 @@ jfieldID GetFieldID(JNIEnv*, jclass, const char* name, const char*)
     r->value = v ? strtof(v, 0) : 0.0f;
     return reinterpret_cast<jfieldID>(r);
 }
-float GetFloatField(JNIEnv*, void*, jfieldID f)
-{
-    return f && static_cast<void*>(f) != static_cast<void*>(&s_dummy) ? reinterpret_cast<FieldRec*>(f)->value : 0.0f;
-}
-jobject ReturnDummy() { return Dummy(); }
+jfloat AnswerFloat(const void* f) { return f && f != &s_dummy ? static_cast<const FieldRec*>(f)->value : 0.0f; }
 const char* EmptyUTF(JNIEnv*, jstring, jboolean* isCopy)
 {
     if (isCopy) *isCopy = 0;
@@ -107,38 +117,95 @@ const char* EmptyUTF(JNIEnv*, jstring, jboolean* isCopy)
 
 JNINativeInterface* MakeTable()
 {
-    static JNINativeInterface t;
-    void** slots = reinterpret_cast<void**>(&t);  // raw-offset: the JNI function table filled slot by slot
-    for (size_t i = 0; i < sizeof t / sizeof(void*); ++i) slots[i] = reinterpret_cast<void*>(NullFn);
+    static JNINativeInterface t;   // reserved0..3 stay null
+    // Every function slot first answers zero, each with a function of its own type (Slot above)...
+#define Z(name) t.name = &Slot<decltype(t.name)>::Zero;
+    Z(GetVersion) Z(DefineClass) Z(FindClass) Z(FromReflectedMethod)
+    Z(FromReflectedField) Z(ToReflectedMethod) Z(GetSuperclass) Z(IsAssignableFrom)
+    Z(ToReflectedField) Z(Throw) Z(ThrowNew) Z(ExceptionOccurred)
+    Z(ExceptionDescribe) Z(ExceptionClear) Z(FatalError) Z(PushLocalFrame)
+    Z(PopLocalFrame) Z(NewGlobalRef) Z(DeleteGlobalRef) Z(DeleteLocalRef)
+    Z(IsSameObject) Z(NewLocalRef) Z(EnsureLocalCapacity) Z(AllocObject)
+    Z(NewObject) Z(NewObjectV) Z(NewObjectA) Z(GetObjectClass)
+    Z(IsInstanceOf) Z(GetMethodID) Z(CallObjectMethod) Z(CallObjectMethodV)
+    Z(CallObjectMethodA) Z(CallBooleanMethod) Z(CallBooleanMethodV) Z(CallBooleanMethodA)
+    Z(CallByteMethod) Z(CallByteMethodV) Z(CallByteMethodA) Z(CallCharMethod)
+    Z(CallCharMethodV) Z(CallCharMethodA) Z(CallShortMethod) Z(CallShortMethodV)
+    Z(CallShortMethodA) Z(CallIntMethod) Z(CallIntMethodV) Z(CallIntMethodA)
+    Z(CallLongMethod) Z(CallLongMethodV) Z(CallLongMethodA) Z(CallFloatMethod)
+    Z(CallFloatMethodV) Z(CallFloatMethodA) Z(CallDoubleMethod) Z(CallDoubleMethodV)
+    Z(CallDoubleMethodA) Z(CallVoidMethod) Z(CallVoidMethodV) Z(CallVoidMethodA)
+    Z(CallNonvirtualObjectMethod) Z(CallNonvirtualObjectMethodV) Z(CallNonvirtualObjectMethodA) Z(CallNonvirtualBooleanMethod)
+    Z(CallNonvirtualBooleanMethodV) Z(CallNonvirtualBooleanMethodA) Z(CallNonvirtualByteMethod) Z(CallNonvirtualByteMethodV)
+    Z(CallNonvirtualByteMethodA) Z(CallNonvirtualCharMethod) Z(CallNonvirtualCharMethodV) Z(CallNonvirtualCharMethodA)
+    Z(CallNonvirtualShortMethod) Z(CallNonvirtualShortMethodV) Z(CallNonvirtualShortMethodA) Z(CallNonvirtualIntMethod)
+    Z(CallNonvirtualIntMethodV) Z(CallNonvirtualIntMethodA) Z(CallNonvirtualLongMethod) Z(CallNonvirtualLongMethodV)
+    Z(CallNonvirtualLongMethodA) Z(CallNonvirtualFloatMethod) Z(CallNonvirtualFloatMethodV) Z(CallNonvirtualFloatMethodA)
+    Z(CallNonvirtualDoubleMethod) Z(CallNonvirtualDoubleMethodV) Z(CallNonvirtualDoubleMethodA) Z(CallNonvirtualVoidMethod)
+    Z(CallNonvirtualVoidMethodV) Z(CallNonvirtualVoidMethodA) Z(GetFieldID) Z(GetObjectField)
+    Z(GetBooleanField) Z(GetByteField) Z(GetCharField) Z(GetShortField)
+    Z(GetIntField) Z(GetLongField) Z(GetFloatField) Z(GetDoubleField)
+    Z(SetObjectField) Z(SetBooleanField) Z(SetByteField) Z(SetCharField)
+    Z(SetShortField) Z(SetIntField) Z(SetLongField) Z(SetFloatField)
+    Z(SetDoubleField) Z(GetStaticMethodID) Z(CallStaticObjectMethod) Z(CallStaticObjectMethodV)
+    Z(CallStaticObjectMethodA) Z(CallStaticBooleanMethod) Z(CallStaticBooleanMethodV) Z(CallStaticBooleanMethodA)
+    Z(CallStaticByteMethod) Z(CallStaticByteMethodV) Z(CallStaticByteMethodA) Z(CallStaticCharMethod)
+    Z(CallStaticCharMethodV) Z(CallStaticCharMethodA) Z(CallStaticShortMethod) Z(CallStaticShortMethodV)
+    Z(CallStaticShortMethodA) Z(CallStaticIntMethod) Z(CallStaticIntMethodV) Z(CallStaticIntMethodA)
+    Z(CallStaticLongMethod) Z(CallStaticLongMethodV) Z(CallStaticLongMethodA) Z(CallStaticFloatMethod)
+    Z(CallStaticFloatMethodV) Z(CallStaticFloatMethodA) Z(CallStaticDoubleMethod) Z(CallStaticDoubleMethodV)
+    Z(CallStaticDoubleMethodA) Z(CallStaticVoidMethod) Z(CallStaticVoidMethodV) Z(CallStaticVoidMethodA)
+    Z(GetStaticFieldID) Z(GetStaticObjectField) Z(GetStaticBooleanField) Z(GetStaticByteField)
+    Z(GetStaticCharField) Z(GetStaticShortField) Z(GetStaticIntField) Z(GetStaticLongField)
+    Z(GetStaticFloatField) Z(GetStaticDoubleField) Z(SetStaticObjectField) Z(SetStaticBooleanField)
+    Z(SetStaticByteField) Z(SetStaticCharField) Z(SetStaticShortField) Z(SetStaticIntField)
+    Z(SetStaticLongField) Z(SetStaticFloatField) Z(SetStaticDoubleField) Z(NewString)
+    Z(GetStringLength) Z(GetStringChars) Z(ReleaseStringChars) Z(NewStringUTF)
+    Z(GetStringUTFLength) Z(GetStringUTFChars) Z(ReleaseStringUTFChars) Z(GetArrayLength)
+    Z(NewObjectArray) Z(GetObjectArrayElement) Z(SetObjectArrayElement) Z(NewBooleanArray)
+    Z(NewByteArray) Z(NewCharArray) Z(NewShortArray) Z(NewIntArray)
+    Z(NewLongArray) Z(NewFloatArray) Z(NewDoubleArray) Z(GetBooleanArrayElements)
+    Z(GetByteArrayElements) Z(GetCharArrayElements) Z(GetShortArrayElements) Z(GetIntArrayElements)
+    Z(GetLongArrayElements) Z(GetFloatArrayElements) Z(GetDoubleArrayElements) Z(ReleaseBooleanArrayElements)
+    Z(ReleaseByteArrayElements) Z(ReleaseCharArrayElements) Z(ReleaseShortArrayElements) Z(ReleaseIntArrayElements)
+    Z(ReleaseLongArrayElements) Z(ReleaseFloatArrayElements) Z(ReleaseDoubleArrayElements) Z(GetBooleanArrayRegion)
+    Z(GetByteArrayRegion) Z(GetCharArrayRegion) Z(GetShortArrayRegion) Z(GetIntArrayRegion)
+    Z(GetLongArrayRegion) Z(GetFloatArrayRegion) Z(GetDoubleArrayRegion) Z(SetBooleanArrayRegion)
+    Z(SetByteArrayRegion) Z(SetCharArrayRegion) Z(SetShortArrayRegion) Z(SetIntArrayRegion)
+    Z(SetLongArrayRegion) Z(SetFloatArrayRegion) Z(SetDoubleArrayRegion) Z(RegisterNatives)
+    Z(UnregisterNatives) Z(MonitorEnter) Z(MonitorExit) Z(GetJavaVM)
+    Z(GetStringRegion) Z(GetStringUTFRegion) Z(GetPrimitiveArrayCritical) Z(ReleasePrimitiveArrayCritical)
+    Z(GetStringCritical) Z(ReleaseStringCritical) Z(NewWeakGlobalRef) Z(DeleteWeakGlobalRef)
+    Z(ExceptionCheck) Z(NewDirectByteBuffer) Z(GetDirectBufferAddress) Z(GetDirectBufferCapacity)
+    Z(GetObjectRefType)
+#undef Z
+    // ...then the ones that answer something else.
     t.FindClass = FindClass;
     t.GetMethodID = GetMethodID;
     t.GetStaticMethodID = GetMethodID;
     t.GetFieldID = GetFieldID;
     t.GetStaticFieldID = GetFieldID;
-    t.GetObjectClass = reinterpret_cast<jclass (*)(JNIEnv*, jobject)>(ReturnDummy);
-    t.NewStringUTF = reinterpret_cast<jstring (*)(JNIEnv*, const char*)>(ReturnDummy);
-    t.NewGlobalRef = reinterpret_cast<jobject (*)(JNIEnv*, jobject)>(ReturnDummy);
     t.GetStringUTFChars = EmptyUTF;
-#define B(name) *reinterpret_cast<void**>(&t.name) = reinterpret_cast<void*>(CallBool);
-#define I(name) *reinterpret_cast<void**>(&t.name) = reinterpret_cast<void*>(CallInt);
+#define H(name) t.name = &Slot<decltype(t.name)>::Handle;
+    H(GetObjectClass) H(NewStringUTF) H(NewGlobalRef)
+#undef H
+#define A(name, answer) t.name = &ById<decltype(t.name)>::template Fn<answer>;
+#define B(name) A(name, AnswerBool)
+#define I(name) A(name, AnswerInt)
+#define F(name) A(name, AnswerFloat)
     B(CallBooleanMethod) B(CallBooleanMethodV) B(CallBooleanMethodA) B(CallStaticBooleanMethod)
     B(CallStaticBooleanMethodV) B(CallStaticBooleanMethodA)
     I(CallIntMethod) I(CallIntMethodV) I(CallIntMethodA) I(CallStaticIntMethod)
     I(CallStaticIntMethodV) I(CallStaticIntMethodA)
+    F(GetFloatField) F(GetStaticFloatField)
 #undef B
 #undef I
-#define F(name) *reinterpret_cast<void**>(&t.name) = reinterpret_cast<void*>(NullFloat);
-#define D(name) *reinterpret_cast<void**>(&t.name) = reinterpret_cast<void*>(NullDouble);
-    F(CallFloatMethod) F(CallFloatMethodV) F(CallFloatMethodA) F(CallNonvirtualFloatMethod)
-    F(CallNonvirtualFloatMethodV) F(CallNonvirtualFloatMethodA) F(CallStaticFloatMethod)
-    F(CallStaticFloatMethodV) F(CallStaticFloatMethodA)
-    D(CallDoubleMethod) D(CallDoubleMethodV) D(CallDoubleMethodA) D(CallNonvirtualDoubleMethod)
-    D(CallNonvirtualDoubleMethodV) D(CallNonvirtualDoubleMethodA) D(CallStaticDoubleMethod)
-    D(CallStaticDoubleMethodV) D(CallStaticDoubleMethodA) D(GetDoubleField) D(GetStaticDoubleField)
 #undef F
-#undef D
-    *reinterpret_cast<void**>(&t.GetFloatField) = reinterpret_cast<void*>(GetFloatField);
-    *reinterpret_cast<void**>(&t.GetStaticFloatField) = reinterpret_cast<void*>(GetFloatField);
+#undef A
+    // A slot jni.h gains later and the list above misses would be a null call: fail here instead.
+    void* const* slots = reinterpret_cast<void* const*>(&t);  // raw-offset: checks the table slot by slot
+    for (size_t i = 4; i < sizeof t / sizeof(void*); ++i)
+        if (!slots[i]) { fprintf(stderr, "k2: JNI stub table: slot %zu has no function\n", i); abort(); }
     return &t;
 }
 
